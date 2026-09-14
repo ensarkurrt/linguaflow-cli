@@ -4,5 +4,6 @@ export class CliError extends Error {
     readonly exitCode = 1,
   ) {
     super(message)
+    this.name = 'CliError'
   }
 }

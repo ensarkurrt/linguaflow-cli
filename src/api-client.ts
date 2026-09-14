@@ -9,6 +9,8 @@ import {
 } from '@linguaflow/management-sdk'
 
 const productionOrigin = 'https://api.linguaflow.dev'
+const runtimeContractVersion = '2'
+const maxPublicResponseBytes = 10 * 1024 * 1024
 
 export type JsonDecoder<T> = ResponseDecoder<T>
 
@@ -68,7 +70,7 @@ export class ApiClient {
     const response = await this.request(path, init)
     let payload: unknown
     try {
-      payload = await response.json()
+      payload = JSON.parse(await readResponseText(response, maxPublicResponseBytes)) as unknown
       return decoder.parse(payload)
     } catch (error) {
       if (error instanceof CliError) throw error
@@ -85,13 +87,13 @@ export class ApiClient {
     ) {
       headers.set('x-linguaflow-sdk', 'cli')
       headers.set('x-linguaflow-sdk-version', cliVersion)
-      headers.set('x-linguaflow-contract-version', '1')
+      headers.set('x-linguaflow-contract-version', runtimeContractVersion)
     }
     if (init.body) headers.set('content-type', 'application/json')
     const response = await this.transport(new URL(path, productionOrigin), {
+      ...init,
       redirect: 'error',
       signal: init.signal ?? AbortSignal.timeout(30_000),
-      ...init,
       headers,
     }).catch((error: unknown) => {
       throw new CliError(
@@ -102,13 +104,38 @@ export class ApiClient {
       )
     })
     if (!response.ok) {
-      const payload: unknown = await response.json().catch(() => null)
+      const payload: unknown = await readResponseText(response, 256 * 1024)
+        .then((body) => JSON.parse(body) as unknown)
+        .catch(() => null)
       throw new CliError(
         apiErrorMessage(payload) ?? `LinguaFlow request failed (${response.status})`,
       )
     }
     return response
   }
+}
+
+async function readResponseText(response: Response, maxBytes: number): Promise<string> {
+  const declaredLength = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new CliError('LinguaFlow response is too large', 65)
+  }
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let body = ''
+  let receivedBytes = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    receivedBytes += value.byteLength
+    if (receivedBytes > maxBytes) {
+      await reader.cancel()
+      throw new CliError('LinguaFlow response is too large', 65)
+    }
+    body += decoder.decode(value, { stream: true })
+  }
+  return body + decoder.decode()
 }
 
 function managementCliError(error: unknown): CliError {

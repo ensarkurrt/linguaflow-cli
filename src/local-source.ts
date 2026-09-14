@@ -5,6 +5,12 @@ import { readUtf8 } from '#files'
 import { documentSnapshot } from '#local-documents'
 import type { CliConfig, PublishedSchema } from '#types'
 
+export type LocalLocalizationDocument = {
+  content: string
+  format: LocalizationFormat
+  locale?: string
+}
+
 export async function readLocalSnapshot(input: {
   cwd: string
   config: CliConfig
@@ -44,7 +50,7 @@ export async function readLocalDocuments(input: {
   cwd: string
   config: CliConfig
   locales: string[]
-}): Promise<Array<{ content: string; format: LocalizationFormat; locale?: string }>> {
+}): Promise<LocalLocalizationDocument[]> {
   const source = fromProject(input.cwd, input.config.sourcePath)
   if (input.config.format === 'csv' || input.config.format === 'string_catalog') {
     return [{ content: await readUtf8(source), format: input.config.format }]

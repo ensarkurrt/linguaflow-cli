@@ -34,7 +34,7 @@ async function readRemoteSnapshot(
           locale,
         }),
       )
-      const values = JSON.parse(body) as Record<string, string>
+      const values = parseFlatTranslationDocument(body)
       for (const [key, value] of Object.entries(values)) {
         snapshot[key] ??= {}
         snapshot[key]![locale] = value
@@ -42,4 +42,24 @@ async function readRemoteSnapshot(
     }),
   )
   return snapshot
+}
+
+function parseFlatTranslationDocument(body: string): Record<string, string> {
+  let value: unknown
+  try {
+    value = JSON.parse(body) as unknown
+  } catch {
+    throw new Error('LinguaFlow returned invalid translation JSON')
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('LinguaFlow returned an invalid translation document')
+  }
+  const result: Record<string, string> = {}
+  for (const [key, translation] of Object.entries(value)) {
+    if (typeof translation !== 'string') {
+      throw new Error('LinguaFlow returned an invalid translation value')
+    }
+    result[key] = translation
+  }
+  return result
 }

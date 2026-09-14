@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { LOCALIZATION_FORMATS, type LocalizationFormat } from '@linguaflow/core'
 import { Arguments } from '#arguments'
 import { fromProject } from '#config'
@@ -8,13 +7,16 @@ import { requireProject, url } from '#project'
 import { fetchSchema } from '#schema'
 import { fetchDraftRevision } from '#draft'
 import type { CommandContext } from '#types'
-import { importResultContract } from '#api-contracts'
+import { importResultContract, type ImportResult } from '#api-contracts'
+import { readUtf8 } from '#files'
 
 export async function push(context: CommandContext, args: Arguments): Promise<void> {
   const { projectId, branchId } = requireProject(context.config)
-  const format = (args.option('--format') ?? context.config.format) as LocalizationFormat
-  if (!LOCALIZATION_FORMATS.includes(format))
-    throw new CliError(`Unsupported format: ${format}`, 64)
+  const formatValue = args.option('--format') ?? context.config.format
+  if (!isLocalizationFormat(formatValue)) {
+    throw new CliError(`Unsupported format: ${formatValue}`, 64)
+  }
+  const format = formatValue
   const locale = args.option('--locale')
   const requestedFile = args.option('--file')
   if (requestedFile && !['csv', 'string_catalog'].includes(format) && !locale) {
@@ -25,11 +27,10 @@ export async function push(context: CommandContext, args: Arguments): Promise<vo
         {
           format,
           locale,
-          content: await readFile(fromProject(context.cwd, requestedFile), 'utf8')
-            .catch(() => {
-              throw new CliError(`Translation file not found: ${requestedFile}`, 66)
-            })
-            .then((content) => normalizeSourceContent(content, format)),
+          content: normalizeSourceContent(
+            await readUtf8(fromProject(context.cwd, requestedFile)),
+            format,
+          ),
         },
       ]
     : await readLocalDocuments({
@@ -37,7 +38,7 @@ export async function push(context: CommandContext, args: Arguments): Promise<vo
         config: context.config,
         locales: (await fetchSchema(context)).locales,
       })
-  const results: Array<{ keyCount: number; valueCount: number; locales: string[] }> = []
+  const results: ImportResult[] = []
   let expectedRevision = await fetchDraftRevision(context, branchId)
   for (const document of documents) {
     const result = await context.api.managementJson(
@@ -56,4 +57,8 @@ export async function push(context: CommandContext, args: Arguments): Promise<vo
   context.stdout.write(
     `Pushed ${result.valueCount} values across ${result.keyCount} keys (${result.locales.join(', ')}).\n`,
   )
+}
+
+function isLocalizationFormat(value: string): value is LocalizationFormat {
+  return LOCALIZATION_FORMATS.some((format) => format === value)
 }

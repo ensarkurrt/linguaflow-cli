@@ -30,7 +30,7 @@ export async function pull(context: CommandContext): Promise<void> {
     writeAtomic(
       join(output, 'manifest.json'),
       json({
-        version: 1,
+        version: 2,
         releaseId: schema.releaseId,
         sequence: schema.sequence,
         requestedLocale: schema.fallbackLocale,
@@ -46,6 +46,7 @@ export async function pull(context: CommandContext): Promise<void> {
         overlays: schema.overlays?.map((overlay) => overlay.slug) ?? [],
         overlay: context.config.overlay ?? null,
         missingKeyTelemetry: { enabled: false, maxBatchSize: 100 },
+        runtimeTelemetry: null,
         rollout: {
           candidateReleaseId: schema.releaseId,
           percentage: 100,

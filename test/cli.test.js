@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -13,6 +13,7 @@ import {
   generateTypeScript,
 } from '../dist/generator.js'
 import { normalizeSourceContent, readLocalDocuments } from '../dist/local-source.js'
+import { readUtf8 } from '../dist/files.js'
 
 const schema = {
   keys: ['home.title', 'cart.items'],
@@ -67,6 +68,8 @@ test('pull writes immutable release inputs atomically', async () => {
   await run(['pull'], { cwd, api, stdout: { write: (value) => output.push(value) } })
   const manifest = JSON.parse(await readFile(join(cwd, 'assets/i18n/manifest.json'), 'utf8'))
   assert.equal(manifest.releaseId, 'release-1')
+  assert.equal(manifest.version, 2)
+  assert.equal(manifest.runtimeTelemetry, null)
   assert.deepEqual(manifest.supportedLocales, ['en', 'tr', 'ar'])
   assert.match(output.join(''), /Pulled 2 locale bundles/)
 })
@@ -101,13 +104,13 @@ test('check returns exit code 2 for an invalid ICU contract', async () => {
 
 test('management client sends bearer auth and rejects redirects', async () => {
   let authorization
-  const success = new ApiClient('lf_mgmt_live_secret', async (_url, init) => {
+  const success = new ApiClient('lf_mgmt_live_test_secret', async (_url, init) => {
     authorization = new Headers(init.headers).get('authorization')
     assert.equal(init.redirect, 'error')
     return Response.json({ branches: [] })
   })
   await success.managementJson('/v1/management/projects/x/branches', branchListContract)
-  assert.equal(authorization, 'Bearer lf_mgmt_live_secret')
+  assert.equal(authorization, 'Bearer lf_mgmt_live_test_secret')
 
   assert.throws(
     () =>
@@ -212,6 +215,48 @@ test('push forwards an explicit PO file without treating it as JSON', async () =
     stdout: { write() {} },
   })
   assert.deepEqual(body, { format: 'po', locale: 'tr', content, expectedRevision: 7 })
+})
+
+test('publish reports the generated approval request identifier', async () => {
+  const cwd = await projectDirectory(true)
+  const output = []
+  const requestId = '30000000-0000-4000-8000-000000000000'
+  await run(['publish', '--message', 'Approval candidate'], {
+    cwd,
+    api: {
+      managementJson: async (path) =>
+        path.endsWith('/draft') ? { revision: 4 } : { status: 'approval_required', requestId },
+    },
+    stdout: { write: (value) => output.push(value) },
+  })
+
+  assert.equal(output.join(''), `Created approval request ${requestId}.\n`)
+})
+
+test('rejects config and generated output paths outside the project', async () => {
+  const cwd = await projectDirectory()
+  await assert.rejects(run(['pull', '--config', '../secret.json'], { cwd }), /inside the project/)
+  await writeFile(
+    join(cwd, '.linguaconfig'),
+    JSON.stringify({
+      branchKey: 'br_live_test',
+      output: '../escaped.dart',
+    }),
+  )
+  await assert.rejects(
+    run(['generate'], { cwd, api: { publicJson: async () => schema } }),
+    /inside the project/,
+  )
+})
+
+test('rejects symlinked source files', async () => {
+  const cwd = await projectDirectory()
+  const external = join(await mkdtemp(join(tmpdir(), 'linguaflow-external-')), 'secret.json')
+  await writeFile(external, '{"secret":"must-not-be-read"}')
+  const linked = join(cwd, 'linked.json')
+  await symlink(external, linked)
+
+  await assert.rejects(readUtf8(linked), /not found or unreadable/)
 })
 
 const projectId = '10000000-0000-4000-8000-000000000000'

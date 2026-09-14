@@ -1,16 +1,17 @@
-import { readFile } from 'node:fs/promises'
-import { isAbsolute, resolve } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
 import { LOCALIZATION_FORMATS, type LocalizationFormat } from '@linguaflow/core'
 import { CliError } from '#errors'
 import type { CliConfig, LoadedCliConfig } from '#types'
+import { readUtf8 } from '#files'
 
 export async function loadConfig(cwd: string, requestedPath?: string): Promise<LoadedCliConfig> {
-  const path = resolve(cwd, requestedPath ?? '.linguaconfig')
+  const path = fromProject(cwd, requestedPath ?? '.linguaconfig')
   let value: unknown
   try {
-    value = JSON.parse(await readFile(path, 'utf8'))
+    value = JSON.parse(await readUtf8(path))
   } catch (error) {
     if (error instanceof SyntaxError) throw new CliError(`${path} is not valid JSON`, 65)
+    if (error instanceof CliError) throw error
     throw new CliError(`LinguaFlow config not found: ${path}`, 66)
   }
   if (!isRecord(value)) throw new CliError('LinguaFlow config must be a JSON object', 65)
@@ -18,9 +19,11 @@ export async function loadConfig(cwd: string, requestedPath?: string): Promise<L
   if (!/^br_live_[A-Za-z0-9_-]+$/.test(branchKey)) {
     throw new CliError('branchKey must be a LinguaFlow public delivery key', 65)
   }
-  const format = (value.format ?? 'nested_json') as LocalizationFormat
-  if (!LOCALIZATION_FORMATS.includes(format))
-    throw new CliError(`Unsupported format: ${format}`, 65)
+  const formatValue = value.format ?? 'nested_json'
+  if (!isLocalizationFormat(formatValue)) {
+    throw new CliError(`Unsupported format: ${String(formatValue)}`, 65)
+  }
+  const format = formatValue
   return {
     path,
     config: {
@@ -45,14 +48,16 @@ function generatorOutputs(value: Record<string, unknown>): CliConfig['outputs'] 
   for (const key of Object.keys(outputs)) {
     if (!allowed.has(key)) throw new CliError(`Unsupported generator target: ${key}`, 65)
   }
-  return Object.fromEntries(
-    Object.entries(outputs).map(([target, output]) => {
-      if (typeof output !== 'string' || !output.trim() || output.includes('\0')) {
-        throw new CliError(`outputs.${target} must be a non-empty path`, 65)
-      }
-      return [target, output]
-    }),
-  ) as CliConfig['outputs']
+  const result: CliConfig['outputs'] = {}
+  for (const [target, output] of Object.entries(outputs)) {
+    if (typeof output !== 'string' || !output.trim() || output.includes('\0')) {
+      throw new CliError(`outputs.${target} must be a non-empty path`, 65)
+    }
+    if (target === 'dart' || target === 'typescript' || target === 'swift' || target === 'kotlin') {
+      result[target] = output
+    }
+  }
+  return result
 }
 
 function optionalSlug(value: Record<string, unknown>, key: string): string | undefined {
@@ -65,7 +70,14 @@ function optionalSlug(value: Record<string, unknown>, key: string): string | und
 }
 
 export function fromProject(cwd: string, value: string): string {
-  return isAbsolute(value) ? value : resolve(cwd, value)
+  if (isAbsolute(value)) throw new CliError('Project paths must be relative', 65)
+  const root = resolve(cwd)
+  const path = resolve(root, value)
+  const relation = relative(root, path)
+  if (relation === '..' || relation.startsWith('../') || relation.startsWith('..\\')) {
+    throw new CliError('Project paths must stay inside the project directory', 65)
+  }
+  return path
 }
 
 function pathValue(value: Record<string, unknown>, key: string, fallback: string): string {
@@ -93,4 +105,8 @@ function requiredString(value: Record<string, unknown>, key: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isLocalizationFormat(value: unknown): value is LocalizationFormat {
+  return typeof value === 'string' && LOCALIZATION_FORMATS.some((format) => format === value)
 }

@@ -1,4 +1,11 @@
 import { z } from 'zod'
+import {
+  BranchCreatedResponseDto,
+  BranchListResponseDto,
+  DraftResponseDto,
+  LocalizationImportResponseDto,
+  PublishReleaseResponseDto,
+} from '@linguaflow/management-sdk/schemas'
 
 const translationValueSchema: z.ZodType<Record<string, unknown>> = z.lazy(() =>
   z.record(z.string(), z.union([z.string(), translationValueSchema])),
@@ -29,31 +36,16 @@ export const publishedSchemaContract = z
   })
   .strip()
 
-export const branchListContract = z.object({
-  branches: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      publishedReleaseId: z.string().nullable(),
-    }),
-  ),
+export const branchListContract = BranchListResponseDto
+export const createdBranchContract = BranchCreatedResponseDto
+export const draftRevisionContract = DraftResponseDto.pick({ revision: true })
+export const importResultContract = LocalizationImportResponseDto
+export type ImportResult = ReturnType<typeof importResultContract.parse>
+export const publishResultContract = PublishReleaseResponseDto.superRefine((result, context) => {
+  if (result.status === 'approval_required' && !result.requestId) {
+    context.addIssue({ code: 'custom', message: 'Approval response requires requestId' })
+  }
+  if (result.status !== 'approval_required' && !result.release) {
+    context.addIssue({ code: 'custom', message: 'Published response requires release' })
+  }
 })
-
-export const createdBranchContract = z.object({ id: z.string() })
-export const draftRevisionContract = z.object({ revision: z.number().int().nonnegative() })
-
-export const importResultContract = z.object({
-  revision: z.number().int().nonnegative(),
-  keyCount: z.number().int().nonnegative(),
-  valueCount: z.number().int().nonnegative(),
-  locales: z.array(z.string()),
-})
-
-const releaseSchema = z.object({ id: z.string(), sequence: z.number().int() })
-export const publishResultContract = z.discriminatedUnion('status', [
-  z.object({ status: z.enum(['published', 'scheduled']), release: releaseSchema }),
-  z.object({
-    status: z.literal('approval_required'),
-    approvalRequest: z.object({ id: z.string() }),
-  }),
-])

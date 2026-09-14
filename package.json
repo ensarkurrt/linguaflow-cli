@@ -36,7 +36,8 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && esbuild src/main.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/main.cjs && esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/api.js",
+    "clean": "node scripts/clean-package-output.mjs",
+    "build": "pnpm clean && tsc -p tsconfig.json && esbuild src/main.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/main.cjs && esbuild src/cli.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/api.js",
     "test": "pnpm build && node --test test/*.test.js",
     "prepack": "pnpm build",
     "pack:check": "pnpm pack --pack-destination .artifacts && node scripts/verify-package.mjs"
@@ -52,5 +53,6 @@
   "engines": {
     "node": ">=22.14"
   },
-  "private": false
+  "private": false,
+  "packageManager": "pnpm@10.17.1"
 }
